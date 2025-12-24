@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Christmas Magic Carousel</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: url('image_0.png') no-repeat center center fixed; /* Ảnh nền cũ của bạn */
+            background-size: cover;
+            font-family: 'Segoe UI', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #canvas-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 2;
+        }
+
+        .input_video {
+            display: none;
+        }
+
+        #status {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 10px 20px;
+            border-radius: 30px;
+            color: #fff;
+            font-weight: bold;
+            pointer-events: none;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.3);
+            transition: all 0.3s ease;
+        }
+
+        .completed {
+            color: #ff69b4 !important; /* Chữ màu hồng */
+            font-size: 1.5rem;
+            text-shadow: 0 0 10px #ff69b4;
+            background: rgba(0, 0, 0, 0.8) !important;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+    <div id="status">Đang tải Camera... Vui lòng chờ</div>
+    <div id="canvas-container">
+        <video class="input_video"></video>
+        <canvas class="output_canvas"></canvas>
+    </div>
+
+<script>
+    // --- CẤU HÌNH ---
+    const TARGET_CYCLES = 3; 
+    
+    // DANH SÁCH 4 ẢNH CỦA BẠN (Hãy thay tên file ảnh thật vào đây)
+    // Nếu bạn chưa có đủ 4 ảnh, có thể điền lặp lại tên file cũ
+    const IMAGE_SOURCES = [
+        '1.jpg',  // Ảnh 1
+        '2.jpg', // Ảnh 2
+        '3.png',  // Ảnh 3
+        '4.png'  // Ảnh 4
+    ];
+
+    const PARTICLE_COUNT = 1500;
+    const TREE_COLOR_BASE = '#0f5e30';
+    const ORNAMENT_COLORS = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffa500'];
+    
+    // --- SETUP CANVAS ---
+    const canvas = document.querySelector('.output_canvas');
+    const ctx = canvas.getContext('2d');
+    const statusText = document.getElementById('status');
+    
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    // --- BIẾN TRẠNG THÁI ---
+    let particles = [];
+    let handState = 'OPEN';
+    let prevHandState = 'OPEN';
+    let handPosition = { x: canvas.width / 2, y: canvas.height / 2 };
+    
+    let cycleCount = 0;
+    let isFinished = false;
+    
+    // Biến cho hiệu ứng xoay ảnh (Carousel)
+    let carouselAngle = 0; 
+    let loadedImages = [];
+
+    // --- LOAD ẢNH ---
+    // Hàm load trước toàn bộ ảnh để tránh giật lag khi hiện
+    IMAGE_SOURCES.forEach(src => {
+        const img = new Image();
+        img.src = src;
+        loadedImages.push(img);
+    });
+
+    // --- CLASS HẠT ---
+    class Particle {
+        constructor() {
+            this.x = Math.random() * canvas.width;
+            this.y = Math.random() * canvas.height;
+            this.tx = this.x;
+            this.ty = this.y;
+            
+            this.isOrnament = Math.random() > 0.7; 
+            this.baseColor = this.isOrnament ? ORNAMENT_COLORS[Math.floor(Math.random() * ORNAMENT_COLORS.length)] : TREE_COLOR_BASE;
+            this.color = this.baseColor;
+            this.size = this.isOrnament ? Math.random() * 5 + 2 : Math.random() * 4 + 1;
+            this.speed = 0.08 + Math.random() * 0.06;
+            
+            // Tính vị trí cây thông
+            const treeHeight = 500; 
+            const treeWidth = 350;  
+            const level = Math.random(); 
+            const yPos = (level * treeHeight) - (treeHeight / 2) + 50; 
+            const currentWidth = level * treeWidth;
+            const xPos = (Math.random() - 0.5) * currentWidth;
+            
+            this.treeOffsetX = xPos;
+            this.treeOffsetY = yPos;
+        }
+
+        update() {
+            this.x += (this.tx - this.x) * this.speed;
+            this.y += (this.ty - this.y) * this.speed;
+        }
+
+        draw() {
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fill();
+            
+            if (this.isOrnament || isFinished) {
+                ctx.shadowBlur = isFinished ? 8 : 10;
+                ctx.shadowColor = this.color;
+                ctx.fill();
+                ctx.shadowBlur = 0; 
+            }
+        }
+    }
+
+    for (let i = 0; i < PARTICLE_COUNT; i++) particles.push(new Particle());
+
+    // --- LOGIC VẼ VÀ UPDATE ---
+    function animate() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 1. VẼ HẠT NỀN
+        particles.forEach(p => {
+            if (isFinished) {
+                // Đổi hạt sang màu HỒNG khi xong
+                p.color = `rgba(255, 105, 180, ${Math.random() + 0.3})`; 
+                
+                // Hạt bay dạt ra ngoài rìa để nhường chỗ cho vòng xoay
+                // Tính khoảng cách tới tâm
+                const dx = p.x - canvas.width/2;
+                const dy = p.y - canvas.height/2;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                
+                // Nếu hạt ở quá gần tâm (trong bán kính 350), đẩy nó ra xa
+                if (dist < 350) {
+                    p.tx = canvas.width/2 + (dx/dist) * 400 + (Math.random()-0.5)*100;
+                    p.ty = canvas.height/2 + (dy/dist) * 400 + (Math.random()-0.5)*100;
+                } else if (Math.abs(p.tx - p.x) < 10) {
+                    // Bay lượn tự do ở ngoài rìa
+                    p.tx = p.x + (Math.random() - 0.5) * 100;
+                    p.ty = p.y + (Math.random() - 0.5) * 100;
+                }
+                p.speed = 0.03;
+            } 
+            else if (handState === 'CLOSED') {
+                const centerX = canvas.width / 2;
+                const centerY = canvas.height / 2 + 100;
+                p.tx = centerX + p.treeOffsetX;
+                p.ty = centerY + p.treeOffsetY;
+                p.speed = 0.1;
+                p.color = p.baseColor; 
+            } else {
+                if (Math.abs(p.tx - p.x) < 5) {
+                    p.tx = Math.random() * canvas.width;
+                    p.ty = Math.random() * canvas.height;
+                }
+                p.speed = 0.05;
+                p.color = p.baseColor;
+            }
+            p.update();
+            p.draw();
+        });
+
+        // 2. VẼ 4 ẢNH XOAY VÒNG (CAROUSEL)
+        if (isFinished) {
+            carouselAngle += 0.005; // Tốc độ xoay
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const radiusX = 350; // Độ rộng vòng xoay ngang
+            const radiusY = 40;  // Độ dẹt của vòng xoay (tạo cảm giác 3D)
+
+            // Tính toán vị trí cho từng ảnh
+            let renderList = [];
+
+            loadedImages.forEach((img, index) => {
+                // Chia đều góc cho 4 ảnh (90 độ mỗi ảnh)
+                const theta = carouselAngle + (index * (Math.PI * 2 / loadedImages.length));
+                
+                // Công thức xoay 3D đơn giản
+                const x = centerX + Math.cos(theta) * radiusX;
+                const z = Math.sin(theta); // Giá trị từ -1 (xa) đến 1 (gần)
+                
+                // Y di chuyển nhẹ theo quỹ đạo elip để trông như đĩa xoay
+                const y = centerY + Math.sin(theta) * radiusY; 
+
+                // Scale dựa trên độ sâu (Z): Gần thì to, xa thì nhỏ
+                // Z chạy từ -1 đến 1. Map sang scale từ 0.6 đến 1.2
+                const scale = 0.6 + ((z + 1) / 2) * 0.6; 
+                
+                // Opacity: Xa thì mờ hơn chút
+                const opacity = 0.5 + ((z + 1) / 2) * 0.5;
+
+                renderList.push({ img, x, y, scale, z, opacity });
+            });
+
+            // Sắp xếp ảnh: Ảnh xa vẽ trước, ảnh gần vẽ sau (Z-sort)
+            renderList.sort((a, b) => a.z - b.z);
+
+            // Vẽ ảnh
+            renderList.forEach(item => {
+                if (!item.img.complete) return;
+
+                const baseWidth = 300; // Kích thước gốc của ảnh hiển thị
+                const aspect = item.img.width / item.img.height;
+                const drawW = baseWidth * item.scale;
+                const drawH = drawW / aspect;
+
+                ctx.save();
+                ctx.globalAlpha = item.opacity;
+                
+                // Vẽ khung viền hồng phát sáng
+                ctx.shadowBlur = 20 * item.scale;
+                ctx.shadowColor = "#ff69b4";
+                ctx.strokeStyle = "#ff69b4";
+                ctx.lineWidth = 5 * item.scale;
+                
+                const drawX = item.x - drawW / 2;
+                const drawY = item.y - drawH / 2;
+
+                // Vẽ ảnh
+                ctx.drawImage(item.img, drawX, drawY, drawW, drawH);
+                
+                // Vẽ viền
+                ctx.strokeRect(drawX, drawY, drawW, drawH);
+                
+                ctx.restore();
+            });
+        }
+
+        requestAnimationFrame(animate);
+    }
+    animate();
+
+    // --- XỬ LÝ CAMERA ---
+    const videoElement = document.getElementsByClassName('input_video')[0];
+
+    function onResults(results) {
+        if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) return;
+
+        const landmarks = results.multiHandLandmarks[0];
+        const wrist = landmarks[0];
+        const indexTip = landmarks[8];
+        const distance = Math.sqrt(Math.pow(indexTip.x - wrist.x, 2) + Math.pow(indexTip.y - wrist.y, 2));
+
+        const isClosed = distance < 0.25;
+        handState = isClosed ? 'CLOSED' : 'OPEN';
+
+        if (!isFinished) {
+            if (prevHandState === 'CLOSED' && handState === 'OPEN') {
+                cycleCount++;
+                if (cycleCount >= TARGET_CYCLES) {
+                    isFinished = true;
+                    statusText.innerText = "CHÚC MỪNG GIÁNG SINH ❤️";
+                    statusText.classList.add('completed');
+                }
+            }
+            if (!isFinished) {
+                statusText.innerText = handState === 'CLOSED' 
+                    ? `Đang nạp năng lượng... (${cycleCount}/${TARGET_CYCLES})` 
+                    : `Nắm tay lại để tạo cây (${cycleCount}/${TARGET_CYCLES})`;
+            }
+        }
+        prevHandState = handState;
+    }
+
+    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+    hands.setOptions({maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5});
+    hands.onResults(onResults);
+
+    const camera = new Camera(videoElement, {
+        onFrame: async () => { await hands.send({image: videoElement}); },
+        width: 1280, height: 720
+    });
+    camera.start();
+
+    window.addEventListener('resize', () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    });
+
+</script>
+</body>
+</html>
