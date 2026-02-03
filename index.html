@@ -79,7 +79,25 @@
     <div id="status">Đang khởi động Camera...</div>
     <div id="energy-bar"></div>
     <div id="canvas-container">
-        <video class="input_video"></video>
+<video class="input_video" playsinline muted></video>
+        <button id="startCam"
+  style="
+    position:fixed;
+    z-index:9999;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    padding:16px 28px;
+    font-size:18px;
+    border-radius:12px;
+    border:none;
+    background:#ff0000;
+    color:#fff;
+    box-shadow:0 0 20px rgba(255,0,0,.8);
+  ">
+  🎥 Bật camera
+</button>
+
         <canvas class="output_canvas"></canvas>
     </div>
 
@@ -676,7 +694,20 @@
         onFrame: async () => { await hands.send({image: videoElement}); },
         width: 1280, height: 720
     });
-    camera.start();
+const startBtn = document.getElementById("startCam");
+
+startBtn.addEventListener("click", async () => {
+  startBtn.style.display = "none";
+  statusText.innerText = "Đang mở camera...";
+
+  try {
+    await camera.start();
+    statusText.innerText = "Camera đã sẵn sàng ✋";
+  } catch (e) {
+    statusText.innerText = "Không mở được camera";
+    console.error(e);
+  }
+});
 
     window.addEventListener('resize', () => {
         canvas.width = window.innerWidth;
